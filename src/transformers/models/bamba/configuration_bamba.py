@@ -123,7 +123,7 @@ class BambaConfig(PretrainedConfig):
         pad_token_id=0,
         bos_token_id=1,
         eos_token_id=2,
-        max_position_embeddings=262144,
+        max_position_embeddings=4096,
         attention_dropout=0.0,
         attn_layer_indices=None,
         mamba_n_heads=128,
