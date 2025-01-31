@@ -162,7 +162,7 @@ class BambaConfig(PretrainedConfig):
 
         self.attn_layer_indices = attn_layer_indices
         self.rope_theta = 10000.0
-        self.rope_scaling = None
+        self.rope_scaling = "abf"
         self.partial_rotary_factor = 0.5
 
         mamba_intermediate = mamba_expand * hidden_size
