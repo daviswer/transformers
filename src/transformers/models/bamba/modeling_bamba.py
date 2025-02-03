@@ -160,7 +160,7 @@ class BambaRotaryEmbedding(nn.Module):
 
     @torch.no_grad()
     def forward(self, x, position_ids):
-        if "dynamic" in self.rope_type:
+        if "dynamic" in self.rope_type or "abf" in self.rope_type:
             self._dynamic_frequency_update(position_ids, device=x.device)
 
         # Core RoPE block
