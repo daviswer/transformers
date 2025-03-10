@@ -462,6 +462,7 @@ class BambaMixer(nn.Module):
         self.act = ACT2FN[config.hidden_act]
         self.use_bias = config.mamba_proj_bias
         self.max_seq = config.max_position_embeddings
+        self.scale_factor = self.max_seq / 4096
 
         self.layer_norm_epsilon = config.rms_norm_eps
 
@@ -529,7 +530,7 @@ class BambaMixer(nn.Module):
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
         projected_states = self.in_proj(hidden_states)
         x = projected_states[..., -self.num_heads:] + self.dt_bias
-        a = scale_factor
+        a = max(scale_factor, self.scale_factor, 1)
         sp = torch.nn.functional.softplus
         dt = sp(x).log()
         dt = a*math.log(a)/(a-1) - x/a - (1-1/a)*dt
@@ -711,7 +712,7 @@ class BambaMixer(nn.Module):
                 [self.intermediate_size, self.conv_dim, self.num_heads], dim=-1
         )
         x = dt + self.dt_bias
-        a = scale_factor
+        a = max(scale_factor, self.scale_factor, 1)
         sp = torch.nn.functional.softplus
         dt = sp(x).log()
         dt = a*math.log(a)/(a-1) - x/a - (1-1/a)*dt
