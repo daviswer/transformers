@@ -531,6 +531,7 @@ class BambaMixer(nn.Module):
         projected_states = self.in_proj(hidden_states)
         x = projected_states[..., -self.num_heads:] + self.dt_bias
         a = max(scale_factor, self.scale_factor, 1)
+        a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
         sp = torch.nn.functional.softplus
         dt = sp(x).log()
         dt = a*math.log(a)/(a-1) - x/a - (1-1/a)*dt
@@ -713,6 +714,7 @@ class BambaMixer(nn.Module):
         )
         x = dt + self.dt_bias
         a = max(scale_factor, self.scale_factor, 1)
+        a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
         sp = torch.nn.functional.softplus
         dt = sp(x).log()
         dt = a*math.log(a)/(a-1) - x/a - (1-1/a)*dt
