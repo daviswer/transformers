@@ -462,7 +462,7 @@ class BambaMixer(nn.Module):
         self.act = ACT2FN[config.hidden_act]
         self.use_bias = config.mamba_proj_bias
         self.max_seq = config.max_position_embeddings
-        self.scale_factor = self.max_seq / 4096
+        self.scale_factor = 4
 
         self.layer_norm_epsilon = config.rms_norm_eps
 
@@ -524,21 +524,20 @@ class BambaMixer(nn.Module):
         cache_params: Optional[HybridMambaAttentionDynamicCache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        scale_factor: Optional[float] = 1.0,
+        scale_factor: Optional[float] = 4.0,
     ):
         # 1. Gated MLP's linear projection
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
         projected_states = self.in_proj(hidden_states)
-        a = max(scale_factor, self.scale_factor, 1)
+        a = max(scale_factor, self.scale_factor)
         dt_bias = self.dt_bias
-        if a > 1:
-            x = projected_states[..., -self.num_heads:] + dt_bias
-            sp = torch.nn.functional.softplus
-            a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
-            dt = sp(x).log()
-            dt = a*a.log()/(a-1) - x/a - (1-1/a)*dt
-            dt = x/a - sp(dt)*(1-1/a)
-            projected_states[..., -self.num_heads:] = dt - dt_bias
+        x = projected_states[..., -self.num_heads:] + dt_bias
+        sp = torch.nn.functional.softplus
+        a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
+        dt = sp(x).log()
+        dt = a*a.log()/(a-1) - x/a - (1-1/a)*dt
+        dt = x/a - sp(dt)*(1-1/a)
+        projected_states[..., -self.num_heads:] = dt - dt_bias
 
         # Set up dimensions for reshapes later
         batch_size, seq_len, _ = hidden_states.shape
@@ -703,7 +702,7 @@ class BambaMixer(nn.Module):
         cache_params: Optional[HybridMambaAttentionDynamicCache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        scale_factor: Optional[float] = 1.0,
+        scale_factor: Optional[float] = 4.0,
     ):
         batch_size, seq_len, _ = input_states.shape
         dtype = input_states.dtype
@@ -714,16 +713,15 @@ class BambaMixer(nn.Module):
         gate, hidden_states_B_C, dt = projected_states.split(
                 [self.intermediate_size, self.conv_dim, self.num_heads], dim=-1
         )
-        a = max(scale_factor, self.scale_factor, 1)
+        a = max(scale_factor, self.scale_factor)
         dt_bias = self.dt_bias
-        if a > 1:
-            x = dt + dt_bias
-            sp = torch.nn.functional.softplus
-            a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
-            dt = sp(x).log()
-            dt = a*a.log()/(a-1) - x/a - (1-1/a)*dt
-            dt = x/a - sp(dt)*(1-1/a)
-            dt = dt - dt_bias
+        x = dt + dt_bias
+        sp = torch.nn.functional.softplus
+        a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
+        dt = sp(x).log()
+        dt = a*a.log()/(a-1) - x/a - (1-1/a)*dt
+        dt = x/a - sp(dt)*(1-1/a)
+        dt = dt - dt_bias
 
         use_precomputed_states = (
             cache_params is not None
@@ -925,7 +923,7 @@ class BambaMixer(nn.Module):
         seq_len = self.max_seq
         if cache_position is not None:
             seq_len = max(torch.max(cache_position).item() + 1, seq_len)
-        scale_factor = seq_len / self.max_seq
+        scale_factor = seq_len / 4096
         if is_fast_path_available and "cuda" in self.in_proj.weight.device.type:
             return self.cuda_kernels_forward(hidden_states, cache_params, cache_position, attention_mask, scale_factor)
         dtype = hidden_states.dtype
