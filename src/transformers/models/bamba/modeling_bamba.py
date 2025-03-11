@@ -529,14 +529,15 @@ class BambaMixer(nn.Module):
         # 1. Gated MLP's linear projection
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
         projected_states = self.in_proj(hidden_states)
-        x = projected_states[..., -self.num_heads:] + self.dt_bias
         a = max(scale_factor, self.scale_factor, 1)
-        a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
-        sp = torch.nn.functional.softplus
-        dt = sp(x).log()
-        dt = a*math.log(a)/(a-1) - x/a - (1-1/a)*dt
-        dt = x/a - sp(dt)*(1-1/a)
-        projected_states[..., -self.num_heads:] = dt - self.dt_bias
+        if a > 1:
+            x = projected_states[..., -self.num_heads:] + self.dt_bias
+            a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
+            sp = torch.nn.functional.softplus
+            dt = sp(x).log()
+            dt = a*math.log(a)/(a-1) - x/a - (1-1/a)*dt
+            dt = x/a - sp(dt)*(1-1/a)
+            projected_states[..., -self.num_heads:] = dt - self.dt_bias
 
         # Set up dimensions for reshapes later
         batch_size, seq_len, _ = hidden_states.shape
@@ -712,14 +713,15 @@ class BambaMixer(nn.Module):
         gate, hidden_states_B_C, dt = projected_states.split(
                 [self.intermediate_size, self.conv_dim, self.num_heads], dim=-1
         )
-        x = dt + self.dt_bias
         a = max(scale_factor, self.scale_factor, 1)
-        a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
-        sp = torch.nn.functional.softplus
-        dt = sp(x).log()
-        dt = a*math.log(a)/(a-1) - x/a - (1-1/a)*dt
-        dt = x/a - sp(dt)*(1-1/a)
-        dt = dt - self.dt_bias
+        if a > 1:
+            x = dt + self.dt_bias
+            a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
+            sp = torch.nn.functional.softplus
+            dt = sp(x).log()
+            dt = a*math.log(a)/(a-1) - x/a - (1-1/a)*dt
+            dt = x/a - sp(dt)*(1-1/a)
+            dt = dt - self.dt_bias
 
         use_precomputed_states = (
             cache_params is not None
