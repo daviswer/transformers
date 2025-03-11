@@ -924,7 +924,7 @@ class BambaMixer(nn.Module):
     ):
         seq_len = self.max_seq
         if cache_position is not None:
-            seq_len = max(torch.max(cache_position) + 1, seq_len)
+            seq_len = max(torch.max(cache_position).item() + 1, seq_len)
         scale_factor = seq_len / self.max_seq
         if is_fast_path_available and "cuda" in self.in_proj.weight.device.type:
             return self.cuda_kernels_forward(hidden_states, cache_params, cache_position, attention_mask, scale_factor)
