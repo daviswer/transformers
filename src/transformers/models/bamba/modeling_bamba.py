@@ -530,8 +530,8 @@ class BambaMixer(nn.Module):
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
         projected_states = self.in_proj(hidden_states)
         a = max(scale_factor, self.scale_factor)
+        dt_bias = self.dt_bias
         if a > 1:
-            dt_bias = self.dt_bias
             x = projected_states[..., -self.num_heads:] + dt_bias
             sp = torch.nn.functional.softplus
             dt = sp(x).log()
