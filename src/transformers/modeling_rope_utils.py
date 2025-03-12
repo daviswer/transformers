@@ -123,7 +123,7 @@ def _compute_abf_rope_parameters(
         device (`torch.device`):
             The device to use for initialization of the inverse frequencies.
         seq_len (`int`, *optional*):
-            The current sequence length. Unused for this type of RoPE.
+            The current sequence length.
         rope_kwargs (`Dict`, *optional*):
             BC compatibility with the previous RoPE class instantiation, will be removed in v4.45.
     Returns:
@@ -138,13 +138,13 @@ def _compute_abf_rope_parameters(
     if len(rope_kwargs) > 0:
         base = rope_kwargs["base"]
         dim = rope_kwargs["dim"]
-        max_position_embeddings = rope_kwargs["max_position_embeddings"]
+        max_position_embeddings = config.rope_theta/10000*4096  # Reverse engineer extended len
     elif config is not None:
         base = config.rope_theta
         partial_rotary_factor = config.partial_rotary_factor if hasattr(config, "partial_rotary_factor") else 1.0
         head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
         dim = int(head_dim * partial_rotary_factor)
-        max_position_embeddings = config.max_position_embeddings
+        max_position_embeddings = config.rope_theta/10000*4096  # Reverse engineer extended len
 
     if seq_len is not None and seq_len > max_position_embeddings:
         base = base * seq_len / max_position_embeddings
