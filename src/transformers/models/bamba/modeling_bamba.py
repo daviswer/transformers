@@ -26,6 +26,7 @@
 
 from typing import Callable, Optional, Tuple, Union
 
+import math
 import torch
 from torch import nn
 
@@ -460,6 +461,8 @@ class BambaMixer(nn.Module):
         self.activation = config.hidden_act
         self.act = ACT2FN[config.hidden_act]
         self.use_bias = config.mamba_proj_bias
+        self.max_seq = config.max_position_embeddings
+        self.scale_factor = 4
 
         self.layer_norm_epsilon = config.rms_norm_eps
 
@@ -521,10 +524,19 @@ class BambaMixer(nn.Module):
         cache_params: Optional[HybridMambaAttentionDynamicCache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        scale_factor: Optional[float] = 4.0,
     ):
         # 1. Gated MLP's linear projection
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
         projected_states = self.in_proj(hidden_states)
+        a = max(scale_factor, self.scale_factor)
+        dt_bias = self.dt_bias
+        x = projected_states[..., -self.num_heads:] + dt_bias
+        sp = torch.nn.functional.softplus
+        dt = sp(x).log()
+        dt = a*math.log(a)/(a-1) - x/a - (1-1/a)*dt
+        dt = x/a - sp(dt)*(1-1/a)
+        projected_states[..., -self.num_heads:] = dt - dt_bias
 
         # Set up dimensions for reshapes later
         batch_size, seq_len, _ = hidden_states.shape
@@ -566,7 +578,7 @@ class BambaMixer(nn.Module):
             A = -torch.exp(self.A_log.float())  # (nheads,)
             A = A[:, None, ...][:, :, None].expand(-1, self.head_dim, self.ssm_state_size).to(dtype=torch.float32)
             dt = dt[:, :, None].expand(-1, -1, self.head_dim)
-            dt_bias = self.dt_bias[:, None, ...].expand(-1, self.head_dim)
+            dt_bias = dt_bias[:, None, ...].expand(-1, self.head_dim)
             D = self.D[:, None, ...].expand(-1, self.head_dim)
             B = B.view(batch_size, self.n_groups, B.shape[1] // self.n_groups)
             C = C.view(batch_size, self.n_groups, C.shape[1] // self.n_groups)
@@ -599,7 +611,7 @@ class BambaMixer(nn.Module):
                     projected_states,
                     self.conv1d.weight.squeeze(1),
                     self.conv1d.bias,
-                    self.dt_bias,
+                    dt_bias,
                     A,
                     D=self.D,
                     chunk_size=self.chunk_size,
@@ -665,7 +677,7 @@ class BambaMixer(nn.Module):
                     z=None,
                     seq_idx=None,
                     return_final_states=True,
-                    dt_bias=self.dt_bias,
+                    dt_bias=dt_bias,
                     dt_softplus=True,
                     **dt_limit_kwargs,
                 )
@@ -689,6 +701,7 @@ class BambaMixer(nn.Module):
         cache_params: Optional[HybridMambaAttentionDynamicCache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        scale_factor: Optional[float] = 4.0,
     ):
         batch_size, seq_len, _ = input_states.shape
         dtype = input_states.dtype
@@ -699,6 +712,14 @@ class BambaMixer(nn.Module):
         gate, hidden_states_B_C, dt = projected_states.split(
                 [self.intermediate_size, self.conv_dim, self.num_heads], dim=-1
         )
+        a = max(scale_factor, self.scale_factor)
+        dt_bias = self.dt_bias
+        x = dt + dt_bias
+        sp = torch.nn.functional.softplus
+        dt = sp(x).log()
+        dt = a*math.log(a)/(a-1) - x/a - (1-1/a)*dt
+        dt = x/a - sp(dt)*(1-1/a)
+        dt = dt - dt_bias
 
         use_precomputed_states = (
             cache_params is not None
@@ -754,7 +775,7 @@ class BambaMixer(nn.Module):
             dt = dt[:, 0, :][:, None, ...]
             dt = dt.transpose(1, 2).expand(batch_size, dt.shape[-1], self.head_dim)
             # [num_heads] -> [num_heads, head_dim]
-            dt_bias = self.dt_bias[..., None].expand(self.dt_bias.shape[0], self.head_dim)
+            dt_bias = dt_bias[..., None].expand(dt_bias.shape[0], self.head_dim)
 
             dt = torch.nn.functional.softplus(dt + dt_bias.to(dt.dtype))
             dt = torch.clamp(dt, self.time_step_limit[0], self.time_step_limit[1])
@@ -804,7 +825,7 @@ class BambaMixer(nn.Module):
             y = y.reshape(batch_size, -1)[:, None, ...]
         else:
             # begin ssd naive implementation without einsums
-            dt = nn.functional.softplus(dt + self.dt_bias)
+            dt = nn.functional.softplus(dt + dt_bias)
             dt = torch.clamp(dt, self.time_step_limit[0], self.time_step_limit[1])
             hidden_states = hidden_states.reshape(batch_size, seq_len, -1, self.head_dim).float()
             B = B.reshape(batch_size, seq_len, -1, self.ssm_state_size).float()
@@ -897,14 +918,18 @@ class BambaMixer(nn.Module):
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
     ):
+        seq_len = self.max_seq
+        if cache_position is not None:
+            seq_len = max(torch.max(cache_position) + 1, seq_len)
+        scale_factor = seq_len / self.max_seq
         if is_fast_path_available and "cuda" in self.in_proj.weight.device.type:
-            return self.cuda_kernels_forward(hidden_states, cache_params, cache_position, attention_mask)
+            return self.cuda_kernels_forward(hidden_states, cache_params, cache_position, attention_mask, scale_factor)
         dtype = hidden_states.dtype
         if attention_mask is not None and attention_mask.shape[1] > 1 and attention_mask.shape[0] > 1:
             # tune out hidden states for pad tokens, see https://github.com/state-spaces/mamba/issues/66
             hidden_states = (hidden_states * attention_mask[:, :, None]).to(dtype)
 
-        return self.torch_forward(hidden_states, cache_params, cache_position, attention_mask)
+        return self.torch_forward(hidden_states, cache_params, cache_position, attention_mask, scale_factor)
 
 
 class BambaMLP(nn.Module):
