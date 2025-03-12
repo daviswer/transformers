@@ -529,12 +529,13 @@ class BambaMixer(nn.Module):
         # 1. Gated MLP's linear projection
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
         projected_states = self.in_proj(hidden_states)
-        a = max(scale_factor, self.scale_factor)
+        if isinstance(a, torch.Tensor):
+            a = scale_factor.clamp(min=self.scale_factor).view(-1, *([1]*(len(x.shape)-1)))
+        else:
+            a = max(scale_factor, self.scale_factor)
         dt_bias = self.dt_bias
         x = projected_states[..., -self.num_heads:] + dt_bias
         sp = torch.nn.functional.softplus
-        if isinstance(a, torch.Tensor):
-            a = a.view(-1, *([1]*(len(x.shape)-1)))
         a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
         dt = sp(x).log()
         dt = a*a.log()/(a-1) - x/a - (1-1/a)*dt
@@ -715,12 +716,13 @@ class BambaMixer(nn.Module):
         gate, hidden_states_B_C, dt = projected_states.split(
                 [self.intermediate_size, self.conv_dim, self.num_heads], dim=-1
         )
-        a = max(scale_factor, self.scale_factor)
+        if isinstance(a, torch.Tensor):
+            a = scale_factor.clamp(min=self.scale_factor).view(-1, *([1]*(len(x.shape)-1)))
+        else:
+            a = max(scale_factor, self.scale_factor)
         dt_bias = self.dt_bias
         x = dt + dt_bias
         sp = torch.nn.functional.softplus
-        if isinstance(a, torch.Tensor):
-            a = a.view(-1, *([1]*(len(x.shape)-1)))
         a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
         dt = sp(x).log()
         dt = a*a.log()/(a-1) - x/a - (1-1/a)*dt
