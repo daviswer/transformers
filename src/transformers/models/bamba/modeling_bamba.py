@@ -461,8 +461,8 @@ class BambaMixer(nn.Module):
         self.activation = config.hidden_act
         self.act = ACT2FN[config.hidden_act]
         self.use_bias = config.mamba_proj_bias
-        self.max_seq = config.max_position_embeddings
-        self.scale_factor = 4
+        self.orig_seq = 4096
+        self.scale_factor = config.rope_theta/10000
 
         self.layer_norm_epsilon = config.rms_norm_eps
 
@@ -524,7 +524,7 @@ class BambaMixer(nn.Module):
         cache_params: Optional[HybridMambaAttentionDynamicCache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        scale_factor: Optional[float] = 4.0,
+        scale_factor: Optional[float] = 1.0,
     ):
         # 1. Gated MLP's linear projection
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
@@ -702,7 +702,7 @@ class BambaMixer(nn.Module):
         cache_params: Optional[HybridMambaAttentionDynamicCache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        scale_factor: Optional[float] = 4.0,
+        scale_factor: Optional[float] = 1.0,
     ):
         batch_size, seq_len, _ = input_states.shape
         dtype = input_states.dtype
@@ -920,10 +920,10 @@ class BambaMixer(nn.Module):
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
     ):
-        seq_len = self.max_seq
+        seq_len = self.orig_seq
         if cache_position is not None:
             seq_len = max(torch.max(cache_position).item() + 1, seq_len)
-        scale_factor = seq_len / 4096
+        scale_factor = seq_len / self.orig_seq
         if is_fast_path_available and "cuda" in self.in_proj.weight.device.type:
             return self.cuda_kernels_forward(hidden_states, cache_params, cache_position, attention_mask, scale_factor)
         dtype = hidden_states.dtype
