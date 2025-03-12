@@ -127,19 +127,19 @@ class BambaRotaryEmbedding(nn.Module):
         super().__init__()
         # Force override prior rope/length params
         config.rope_scaling = {"rope_type":"abf"}
-        config.max_position_embeddings = 4096
+        self.max_position_embeddings = config.rope_theta/10000*4096  # Reverse engineer extended length
         # BC: "rope_type" was originally "type"
         if hasattr(config, "rope_scaling") and config.rope_scaling is not None:
             self.rope_type = config.rope_scaling.get("rope_type", config.rope_scaling.get("type"))
         else:
             self.rope_type = "default"
-        self.max_seq_len_cached = config.max_position_embeddings
-        self.original_max_seq_len = config.max_position_embeddings
+        self.max_seq_len_cached = self.max_position_embeddings
+        self.original_max_seq_len = self.max_position_embeddings
 
         self.config = config
         self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
 
-        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device)
+        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device, self.max_position_embeddings)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.original_inv_freq = self.inv_freq
 
