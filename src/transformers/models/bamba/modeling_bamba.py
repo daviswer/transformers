@@ -581,14 +581,12 @@ class BambaMixer(nn.Module):
             out = self.out_proj(hidden_states)[:, None, ...]
         # Fused calculations or step by step if no initialized cache is found
         else:
-            A = -torch.exp(self.A_log.float())/scale_factor  # (num_heads) or (intermediate_size, state_size)
+            A = -torch.exp(self.A_log.float())  # (num_heads) or (intermediate_size, state_size)
             dt_limit_kwargs = {} if self.time_step_limit == (0.0, float("inf")) else {"dt_limit": self.time_step_limit}
-            projected_states[..., 2*self.intermediate_size:2*self.intermediate_size+self.ssm_state_size] = projected_states[..., 2*self.intermediate_size:2*self.intermediate_size+self.ssm_state_size]/scale_factor
-            cb = self.conv1d.bias
-            cb[self.intermediate_size:self.intermediate_size+self.ssm_state_size] = cb[self.intermediate_size:self.intermediate_size+self.ssm_state_size]/scale_factor
-
+            
             # 2-4. Fused kernel for conv1d, SSM, and the final projection
             if self.training and cache_params is None:
+                assert False, "HERE BE DRAGONS"
                 out = mamba_split_conv1d_scan_combined(
                     projected_states,
                     self.conv1d.weight.squeeze(1),
@@ -651,8 +649,8 @@ class BambaMixer(nn.Module):
                 scan_output, ssm_state = mamba_chunk_scan_combined(
                     hidden_states.view(batch_size, seq_len, -1, self.head_dim),
                     dt,
-                    A,
-                    B.view(batch_size, seq_len, self.n_groups, -1),
+                    A/scale_factor,
+                    B.view(batch_size, seq_len, self.n_groups, -1)/scale_factor,
                     C.view(batch_size, seq_len, self.n_groups, -1),
                     chunk_size=self.chunk_size,
                     D=self.D,
