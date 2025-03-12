@@ -702,7 +702,7 @@ class BambaMixer(nn.Module):
         cache_params: Optional[HybridMambaAttentionDynamicCache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        scale_factor: Optional[float] = 1.0,
+        scale_factor: Optional[float|torch.Tensor] = 1.0,
     ):
         batch_size, seq_len, _ = input_states.shape
         dtype = input_states.dtype
@@ -717,6 +717,8 @@ class BambaMixer(nn.Module):
         dt_bias = self.dt_bias
         x = dt + dt_bias
         sp = torch.nn.functional.softplus
+        if isinstance(a, torch.Tensor):
+            a = a.view(-1, *([1]*(len(x.shape)-1)))
         a = 1 + (a - 1) * sp(x).mul(torch.exp(self.A_log.float()).neg()).exp()
         dt = sp(x).log()
         dt = a*a.log()/(a-1) - x/a - (1-1/a)*dt
@@ -922,7 +924,7 @@ class BambaMixer(nn.Module):
     ):
         seq_len = self.orig_seq
         if cache_position is not None:
-            seq_len = max(torch.max(cache_position).item() + 1, seq_len)
+            seq_len = torch.max(cache_position, dim=1)[0].add(1).clamp(min=seq_len)
         scale_factor = seq_len / self.orig_seq
         if is_fast_path_available and "cuda" in self.in_proj.weight.device.type:
             return self.cuda_kernels_forward(hidden_states, cache_params, cache_position, attention_mask, scale_factor)
