@@ -524,7 +524,7 @@ class BambaMixer(nn.Module):
         cache_params: Optional[HybridMambaAttentionDynamicCache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        scale_factor: Optional[float] = 1.0,
+        scale_factor: Optional[float|torch.Tensor] = 1.0,
     ):
         # 1. Gated MLP's linear projection
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
