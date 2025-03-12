@@ -581,9 +581,11 @@ class BambaMixer(nn.Module):
             out = self.out_proj(hidden_states)[:, None, ...]
         # Fused calculations or step by step if no initialized cache is found
         else:
-            assert False, "Scaling not yet supported for this case"
-            A = -torch.exp(self.A_log.float())  # (num_heads) or (intermediate_size, state_size)
+            A = -torch.exp(self.A_log.float())/scale_factor  # (num_heads) or (intermediate_size, state_size)
             dt_limit_kwargs = {} if self.time_step_limit == (0.0, float("inf")) else {"dt_limit": self.time_step_limit}
+            projected_states[..., 2*self.intermediate_size:2*self.intermediate_size+self.d_state] = projected_states[..., 2*self.intermediate_size:2*self.intermediate_size+self.d_state]/scale_factor
+            cb = self.conv1d.bias
+            cb[self.intermediate_size:self.intermediate_size+self.d_state] = cb[self.intermediate_size:self.intermediate_size+self.d_state]/scale_factor
 
             # 2-4. Fused kernel for conv1d, SSM, and the final projection
             if self.training and cache_params is None:
