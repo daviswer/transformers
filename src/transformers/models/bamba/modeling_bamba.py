@@ -583,9 +583,9 @@ class BambaMixer(nn.Module):
         else:
             A = -torch.exp(self.A_log.float())/scale_factor  # (num_heads) or (intermediate_size, state_size)
             dt_limit_kwargs = {} if self.time_step_limit == (0.0, float("inf")) else {"dt_limit": self.time_step_limit}
-            projected_states[..., 2*self.intermediate_size:2*self.intermediate_size+self.d_state] = projected_states[..., 2*self.intermediate_size:2*self.intermediate_size+self.d_state]/scale_factor
+            projected_states[..., 2*self.intermediate_size:2*self.intermediate_size+self.ssm_state_size] = projected_states[..., 2*self.intermediate_size:2*self.intermediate_size+self.ssm_state_size]/scale_factor
             cb = self.conv1d.bias
-            cb[self.intermediate_size:self.intermediate_size+self.d_state] = cb[self.intermediate_size:self.intermediate_size+self.d_state]/scale_factor
+            cb[self.intermediate_size:self.intermediate_size+self.ssm_state_size] = cb[self.intermediate_size:self.intermediate_size+self.ssm_state_size]/scale_factor
 
             # 2-4. Fused kernel for conv1d, SSM, and the final projection
             if self.training and cache_params is None:
