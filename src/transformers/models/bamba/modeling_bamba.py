@@ -130,7 +130,7 @@ class BambaRotaryEmbedding(nn.Module):
         else:
             self.rope_type = "default"
         self.max_seq_len_cached = config.max_position_embeddings
-        self.original_max_seq_len = config.max_position_embeddings
+        # self.original_max_seq_len = config.max_position_embeddings
 
         self.config = config
         self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
@@ -146,22 +146,15 @@ class BambaRotaryEmbedding(nn.Module):
         2 - the current sequence length is in the original scale (avoid losing precision with small sequences)
         """
         seq_len = torch.max(position_ids) + 1
-        if seq_len > self.max_seq_len_cached:  # growth
-            inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device, seq_len=seq_len)
-            self.register_buffer("inv_freq", inv_freq, persistent=False)  # TODO joao: may break with compilation
-            self.max_seq_len_cached = seq_len
-
-        if seq_len < self.original_max_seq_len and self.max_seq_len_cached > self.original_max_seq_len:  # reset
-            # This .to() is needed if the model has been moved to a device after being initialized (because
-            # the buffer is automatically moved, but not the original copy)
-            self.original_inv_freq = self.original_inv_freq.to(device)
-            self.register_buffer("inv_freq", self.original_inv_freq, persistent=False)
-            self.max_seq_len_cached = self.original_max_seq_len
+        # Recalc every time
+        scale_factor = min(1, seq_len/4096)
+        self.config.rope_theta = 10000*scale_factor
+        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device, seq_len=seq_len)
+        self.register_buffer("inv_freq", inv_freq, persistent=False)  # TODO joao: may break with compilation
 
     @torch.no_grad()
     def forward(self, x, position_ids):
-        if "dynamic" in self.rope_type:
-            self._dynamic_frequency_update(position_ids, device=x.device)
+        self._dynamic_frequency_update(position_ids, device=x.device)
 
         # Core RoPE block
         inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1)
@@ -518,6 +511,7 @@ class BambaMixer(nn.Module):
         cache_params: Optional[HybridMambaAttentionDynamicCache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        scale_factor: Optional[float] = 1.0,
     ):
         # 1. Gated MLP's linear projection
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
@@ -572,8 +566,8 @@ class BambaMixer(nn.Module):
                 cache_params.ssm_states[self.layer_idx],
                 hidden_states_reshaped,
                 dt,
-                A,
-                B,
+                A/scale_factor,
+                B/scale_factor,
                 C,
                 D,
                 z=None,
@@ -587,6 +581,7 @@ class BambaMixer(nn.Module):
             out = self.out_proj(hidden_states)[:, None, ...]
         # Fused calculations or step by step if no initialized cache is found
         else:
+            assert False, "Scaling not yet supported for this case"
             A = -torch.exp(self.A_log.float())  # (num_heads) or (intermediate_size, state_size)
             dt_limit_kwargs = {} if self.time_step_limit == (0.0, float("inf")) else {"dt_limit": self.time_step_limit}
 
@@ -686,6 +681,7 @@ class BambaMixer(nn.Module):
         cache_params: Optional[HybridMambaAttentionDynamicCache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        scale_factor: Optional[float] = None,
     ):
         batch_size, seq_len, _ = input_states.shape
         dtype = input_states.dtype
@@ -742,6 +738,10 @@ class BambaMixer(nn.Module):
 
         # 3. SSM transformation
         A = -torch.exp(self.A_log.float())                            # [num_heads]
+
+        # Scaling
+        A = A/scale_factor
+        B = B/scale_factor
         if use_precomputed_states:
             # We need to guarantee that anything regarding the cache is on the same device
             cache_device = cache_params.ssm_states[self.layer_idx].device
@@ -900,8 +900,9 @@ class BambaMixer(nn.Module):
         if attention_mask is not None and attention_mask.shape[1] > 1 and attention_mask.shape[0] > 1:
             # tune out hidden states for pad tokens, see https://github.com/state-spaces/mamba/issues/66
             hidden_states = (hidden_states * attention_mask[:, :, None]).to(dtype)
+        scale_factor = max((max(cache_position)+1)/4096, 1)
 
-        return self.torch_forward(hidden_states, cache_params, cache_position, attention_mask)
+        return self.torch_forward(hidden_states, cache_params, cache_position, attention_mask, scale_factor)
 
 
 class BambaMLP(nn.Module):
