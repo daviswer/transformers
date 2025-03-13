@@ -147,7 +147,7 @@ class BambaRotaryEmbedding(nn.Module):
         """
         seq_len = torch.max(position_ids) + 1
         # Recalc every time
-        scale_factor = min(1, seq_len/4096)
+        scale_factor = max(1, seq_len/4096)
         self.config.rope_theta = 10000*scale_factor
         inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device, seq_len=seq_len)
         self.register_buffer("inv_freq", inv_freq, persistent=False)  # TODO joao: may break with compilation
@@ -894,13 +894,13 @@ class BambaMixer(nn.Module):
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
     ):
+        scale_factor = max((max(cache_position)+1)/4096, 1)
         if is_fast_path_available and "cuda" in self.in_proj.weight.device.type:
-            return self.cuda_kernels_forward(hidden_states, cache_params, cache_position, attention_mask)
+            return self.cuda_kernels_forward(hidden_states, cache_params, cache_position, attention_mask, scale_factor)
         dtype = hidden_states.dtype
         if attention_mask is not None and attention_mask.shape[1] > 1 and attention_mask.shape[0] > 1:
             # tune out hidden states for pad tokens, see https://github.com/state-spaces/mamba/issues/66
             hidden_states = (hidden_states * attention_mask[:, :, None]).to(dtype)
-        scale_factor = max((max(cache_position)+1)/4096, 1)
 
         return self.torch_forward(hidden_states, cache_params, cache_position, attention_mask, scale_factor)
 
