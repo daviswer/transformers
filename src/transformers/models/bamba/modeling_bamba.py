@@ -361,10 +361,11 @@ class BambaRMSNormGated(torch.nn.Module):
 
         if gate is not None:
             hidden_states = hidden_states * nn.functional.silu(gate.to(torch.float32))
-        hidden_states = hidden_states.view(..., self.hidden_size // self.dim_size, self.dim_size)
+        s = hidden_states.shape
+        hidden_states = hidden_states.view(*s[:-1], self.hidden_size // self.dim_size, self.dim_size)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        hidden_states = hidden_states.view(..., self.hidden_size)
+        hidden_states = hidden_states.view(*s)
 
         return self.weight * hidden_states.to(input_dtype)
 
