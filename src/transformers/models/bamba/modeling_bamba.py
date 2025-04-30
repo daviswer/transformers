@@ -504,7 +504,7 @@ class BambaMixer(nn.Module):
         A = torch.arange(1, self.num_heads + 1)
         self.A_log = nn.Parameter(torch.log(A))
         self.A_log._no_weight_decay = True
-        self.norm = BambaRMSNormGated(self.intermediate_size, eps=self.layer_norm_epsilon)
+        self.norm = BambaRMSNormGated(self.intermediate_size, self.head_dim, eps=self.layer_norm_epsilon)
         self.D = nn.Parameter(torch.ones(self.num_heads))
         self.D._no_weight_decay = True
 
