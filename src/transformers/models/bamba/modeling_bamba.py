@@ -351,8 +351,8 @@ class BambaRMSNormGated(torch.nn.Module):
     def __init__(self, hidden_size, dim_size, eps=1e-6):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.dim = dim_size
-        self.hidden = hidden_size
+        self.dim_size = dim_size
+        self.hidden_size = hidden_size
         self.variance_epsilon = eps
 
     def forward(self, hidden_states, gate=None):
