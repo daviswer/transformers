@@ -602,6 +602,16 @@ class BambaMixer(nn.Module):
             B = B.view(batch_size, self.n_groups, B.shape[1] // self.n_groups)
             C = C.view(batch_size, self.n_groups, C.shape[1] // self.n_groups)
             hidden_states_reshaped = hidden_states.view(batch_size, self.num_heads, self.head_dim)
+
+            # UPI
+            scalefactor = 8
+            dt = F.softplus(dt + dt_bias.to(dtype=dt.dtype))  # b h d
+            forget = dt.mul(A[:,:,0]).float().exp()  # b h d
+            # x target: (forget**(1/scale)-1)/(forget-1)*scale
+            xfactor = scalefactor * (1-forget.pow(1/scalefactor)) / (1-forget).add(1e-6)
+            dt = dt / scalefactor
+            hidden_states_reshaped = hidden_states_reshaped * xfactor.to(dtype=hidden_states_reshaped.dtype)
+            
             hidden_states = selective_state_update(
                 cache_params.ssm_states[self.layer_idx],
                 hidden_states_reshaped,
@@ -611,8 +621,8 @@ class BambaMixer(nn.Module):
                 C,
                 D,
                 z=None,
-                dt_bias=dt_bias,
-                dt_softplus=True,
+                dt_bias=None,
+                dt_softplus=False,
             )
             hidden_states = hidden_states.view(batch_size, self.num_heads * self.head_dim)
             hidden_states = self.norm(hidden_states, gate)
@@ -685,9 +695,18 @@ class BambaMixer(nn.Module):
                     dim=-1,
                 )
 
+                # UPI
+                scalefactor = 8
+                dt = F.softplus(dt + self.dt_bias.to(dtype=dt.dtype))  # b l h
+                forget = dt.mul(A).float().exp()
+                # x target: (forget**(1/scale)-1)/(forget-1)*scale
+                xfactor = scalefactor * (1-forget.pow(1/scalefactor)) / (1-forget).add(1e-6)
+                dt = dt/scalefactor
+                hidden_states = hidden_states.view(batch_size, seq_len, -1, self.head_dim) * xfactor.to(dtype=hidden_states.dtype).unsqueeze(-1)
+
                 # 3. SSM transformation
                 scan_output, ssm_state = mamba_chunk_scan_combined(
-                    hidden_states.view(batch_size, seq_len, -1, self.head_dim),
+                    hidden_states,
                     dt,
                     A,
                     B.view(batch_size, seq_len, self.n_groups, -1),
@@ -697,8 +716,8 @@ class BambaMixer(nn.Module):
                     z=None,
                     seq_idx=seq_idx,
                     return_final_states=True,
-                    dt_bias=self.dt_bias,
-                    dt_softplus=True,
+                    dt_bias=None,
+                    dt_softplus=False,
                     **dt_limit_kwargs,
                 )
 
