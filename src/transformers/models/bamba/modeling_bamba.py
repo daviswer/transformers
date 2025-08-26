@@ -671,8 +671,8 @@ class BambaMixer(nn.Module):
                     z=None,
                     seq_idx=seq_idx,
                     return_final_states=True,
-                    dt_bias=self.dt_bias,
-                    dt_softplus=True,
+                    dt_bias=None,
+                    dt_softplus=False,
                     **dt_limit_kwargs,
                 )
 
